@@ -217,7 +217,7 @@ public class ChainNode {
 
     public void ackXid (int xid) {
         System.out.println("calling ack method of predecessor: " + predecessorHostPort);
-        lastSeenXId = xid;
+        lastAckXid = xid;
         pendingMap.remove(xid);
         System.out.println(" Got ack and removed xid : "+ xid);
         var stub = ReplicaGrpc.newBlockingStub(predecessorChannel);

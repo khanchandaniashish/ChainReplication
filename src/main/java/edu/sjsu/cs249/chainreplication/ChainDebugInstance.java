@@ -26,7 +26,7 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
     public void debug(ChainDebugRequest request, StreamObserver<ChainDebugResponse> responseObserver) {
         ChainDebugResponse.Builder builder = ChainDebugResponse.newBuilder();
         System.out.println("debug grpc called");
-        chainNode.printMap();
+//        chainNode.printMap();
         builder.setXid(chainNode.lastSeenXId)
                 .putAllState(chainNode.dataMap);
 
