@@ -40,7 +40,7 @@ public class HeadChainReplicaGRPCServer extends HeadChainReplicaGrpc.HeadChainRe
 
             //Print map
             System.out.println("Map before updates");
-            chainNode.printMap();
+//            //chainNode.printMap();
 
             int updateValue = chainNode.dataMap.getOrDefault(key, 0) + value;
             //Update Map
@@ -51,7 +51,7 @@ public class HeadChainReplicaGRPCServer extends HeadChainReplicaGrpc.HeadChainRe
 
             //Print map
             System.out.println("Map after updates");
-            chainNode.printMap();
+            ////chainNode.printMap();
 
             //if tail, send back ack
             if (chainNode.isTail) {
@@ -63,7 +63,7 @@ public class HeadChainReplicaGRPCServer extends HeadChainReplicaGrpc.HeadChainRe
                 KeyValuePair pendingPair = new KeyValuePair(key, updateValue);
                 chainNode.pendingMap.put(latestId, pendingPair);
                 chainNode.diligentObserver.put(latestId, responseObserver);
-                chainNode.printMap();
+                //chainNode.printMap();
                 //add to pending list : pending list of sent and pending list for head
                 sendUpdatesToSuccessor(pendingPair);
             }

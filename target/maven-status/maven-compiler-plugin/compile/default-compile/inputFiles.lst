@@ -15,6 +15,7 @@
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/target/generated-sources/protobuf/java/edu/sjsu/cs249/chain/NewSuccessorResponseOrBuilder.java
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/target/generated-sources/protobuf/java/edu/sjsu/cs249/chain/ExitResponse.java
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/src/main/java/edu/sjsu/cs249/chainreplication/LogManager.java
+/Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/src/main/java/edu/sjsu/cs249/chainreplication/QueOps.java
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/target/generated-sources/protobuf/java/edu/sjsu/cs249/chain/AckRequest.java
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/target/generated-sources/protobuf/java/edu/sjsu/cs249/chain/UpdateRequest.java
 /Users/ashish/Documents/Semester 2/Distributed Systems/ChainReplication/Chain Replication/target/generated-sources/protobuf/java/edu/sjsu/cs249/chain/AckResponseOrBuilder.java

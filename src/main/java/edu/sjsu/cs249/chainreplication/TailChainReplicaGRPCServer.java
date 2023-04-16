@@ -27,12 +27,12 @@ public class TailChainReplicaGRPCServer extends TailChainReplicaGrpc.TailChainRe
             String key = request.getKey();
             int value= chainNode.dataMap.getOrDefault(key,0);
             System.out.println("I'm the tail, returning GRPC with rc:0 and  key : "+  key + " value :"+ value);
-            chainNode.printMap();
+            //chainNode.printMap();
             responseObserver.onNext(GetResponse.newBuilder().setValue(value).setRc(0).build());
             responseObserver.onCompleted();
         } else {
             System.out.println("I'm not the tail, returning GRPC with 1");
-            chainNode.printMap();
+            //chainNode.printMap();
             responseObserver.onNext(GetResponse.newBuilder().setRc(1).build());
             responseObserver.onCompleted();
         }

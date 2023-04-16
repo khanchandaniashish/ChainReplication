@@ -18,10 +18,16 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
 
     final ChainNode chainNode;
 
+    QueOps successorQueOps;
+
+    QueOps predecessorQueOps;
+
 
     public ReplicaGRPCServer(Initializer initializer) {
         this.initializer = initializer;
         chainNode = initializer.chainNode;
+        successorQueOps = initializer.successorQueOps;
+        predecessorQueOps = initializer.predecessorQueOps;
     }
 
     /**
@@ -30,36 +36,41 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
      */
     @Override
     public void update(UpdateRequest request, StreamObserver<UpdateResponse> responseObserver) {
+        synchronized (chainNode) {
+            String key = request.getKey();
+            int updatedValue = request.getNewValue();
+            int xid = request.getXid();
 
-        String key = request.getKey();
-        int updatedValue = request.getNewValue();
-        int xid = request.getXid();
-
-        System.out.println("Update called with key"+ key + " new value : "+ updatedValue + " and XID:" + xid);
-        chainNode.dataMap.put(key,updatedValue);
-        chainNode.lastSeenXId = xid;
-        chainNode.pendingMap.put(xid,new KeyValuePair(key,updatedValue));
+            System.out.println("Update called with key" + key + " new value : " + updatedValue + " and XID:" + xid);
+            chainNode.dataMap.put(key, updatedValue);
+            chainNode.pendingMap.put(xid, new KeyValuePair(key, updatedValue));
+            System.out.println("Added to pending map : key" + key + " new value : " + updatedValue + " and XID:" + xid);
+            chainNode.lastSeenXId = xid;
 
 
-        if(chainNode.isTail){
-            System.out.println("Acking back from TAIL!");
-            chainNode.ackXid(xid);
-        } else if(chainNode.isSuccessorAlive) {
-            synchronized (chainNode) {
-                //TODO reuse this channel
-                var channel = initializer.createChannel(chainNode.successorHostPort);
-                var stub = ReplicaGrpc.newBlockingStub(channel);
-                var updateRequest = UpdateRequest.newBuilder()
-                        .setXid(xid)
-                        .setKey(key)
-                        .setNewValue(updatedValue)
-                        .build();
-                stub.update(updateRequest);
-                channel.shutdown();
+            if (chainNode.isTail) {
+                System.out.println("Acking back from TAIL!");
+                chainNode.ackXid(xid);
+            } else if(!chainNode.isSuccessorAlive){
+                System.out.println("Succ hasnt reached out yet! Acking calls");
+                chainNode.ackXid(xid);
             }
+            else {
+                synchronized (chainNode) {
+//                var stub = ReplicaGrpc.newBlockingStub(chainNode.successorChannel);
+                    var updateRequest = UpdateRequest.newBuilder()
+                            .setXid(xid)
+                            .setKey(key)
+                            .setNewValue(updatedValue)
+                            .build();
+                    successorQueOps.submitRequest(updateRequest);
+//                stub.update(updateRequest);
+                }
+            }
+            System.out.println("UpdateResponse on complete called");
+            responseObserver.onNext(UpdateResponse.newBuilder().build());
+            responseObserver.onCompleted();
         }
-        responseObserver.onNext(UpdateResponse.newBuilder().build());
-        responseObserver.onCompleted();
     }
 
     /**
@@ -73,6 +84,7 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
     @Override
     public void newSuccessor(NewSuccessorRequest request, StreamObserver<NewSuccessorResponse> responseObserver) {
         synchronized (chainNode) {
+            predecessorQueOps.pause();
             long lastZxidSeen = request.getLastZxidSeen();
             int lastXid = request.getLastXid();
             int lastAck = request.getLastAck();
@@ -97,7 +109,7 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
                 if (Objects.equals(chainNode.successorName, requestedSuccessor)) {
                     successorProcedure(lastAck, lastXid, requestedSuccessor, responseObserver);
                 } else {
-                    System.out.println("replica is not the replica i saw in my view of zookeeper");
+                    System.out.println("replica is notf the replica i saw in my view of zookeeper");
                     responseObserver.onNext(NewSuccessorResponse.newBuilder().setRc(-1).build());
                     responseObserver.onCompleted();
                 }
@@ -106,6 +118,7 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
                 responseObserver.onNext(NewSuccessorResponse.newBuilder().setRc(-1).build());
                 responseObserver.onCompleted();
             }
+            predecessorQueOps.play();
         }
     }
 
@@ -119,8 +132,7 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
                     .putAllState(chainNode.dataMap);
         }
 
-
-        System.out.println("State transfer begins with xid :" + lastXid+1);
+        System.out.println("State transfer begins with xid :" + (lastXid+1));
         for (int xid = lastXid + 1; xid <= chainNode.lastSeenXId; xid += 1) {
             if (chainNode.pendingMap.containsKey(xid)) {
                 newSuccessor.addSent(UpdateRequest.newBuilder()
@@ -131,13 +143,13 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
             }
         }
 
-        chainNode.printMap();
+        //chainNode.printMap();
 
         for (int myAckXid = chainNode.lastAckXid + 1; myAckXid <= lastAck; myAckXid += 1) {
             chainNode.ackXid(myAckXid);
         }
 
-        newSuccessor.setLastXid(chainNode.lastAckXid);
+        newSuccessor.setLastXid(chainNode.lastSeenXId);
 
 
         try {
@@ -163,7 +175,6 @@ public class ReplicaGRPCServer extends ReplicaGrpc.ReplicaImplBase  {
     @Override
     public void ack(AckRequest request, StreamObserver<AckResponse> responseObserver) {
         int xid = request.getXid();
-
 
         try {
             chainNode.ackSemaphore.acquire();
