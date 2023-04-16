@@ -11,6 +11,7 @@ import org.apache.zookeeper.data.Stat;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -51,7 +52,9 @@ public class ChainNode {
     ManagedChannel successorChannel;
     ManagedChannel predecessorChannel;
 
-    public ChainNode(ZooManager zooManager) {
+    QueOps predecessorQueOps;
+
+    public ChainNode(ZooManager zooManager, QueOps predecessorQueOps) {
         this.zooManager = zooManager;
         this.dataMap = new HashMap<>();
         this.pendingMap = new HashMap<>();
@@ -60,6 +63,7 @@ public class ChainNode {
         this.isTail = false;
         this.isSuccessorAlive = false;
         ackSemaphore = new Semaphore(1);
+        this.predecessorQueOps = predecessorQueOps;
     }
 
 
@@ -179,7 +183,7 @@ public class ChainNode {
                             System.out.println("Error getting children with getChildrenInPath()");
                         }
                     } else if (rc == 0) {
-                        lastAckXid = newSuccessorResponse.getLastXid();
+                        lastSeenXId = newSuccessorResponse.getLastXid();
                         //TODO changes
                         System.out.println("lastSeenXId: " + lastSeenXId);
                         System.out.println("state value:");
@@ -209,7 +213,8 @@ public class ChainNode {
 
         if (isTail && pendingMap.size() > 0) {
             System.out.println("I am tail, have to ack back all pending requests!");
-            for (int xid: pendingMap.keySet()) {
+            Map<Integer, KeyValuePair> iterMap = new HashMap<Integer, KeyValuePair>(pendingMap);
+            for (int xid: iterMap.keySet()) {
                 ackXid(xid);
             }
         }
@@ -220,10 +225,11 @@ public class ChainNode {
         lastAckXid = xid;
         pendingMap.remove(xid);
         System.out.println(" Got ack and removed xid : "+ xid);
-        var stub = ReplicaGrpc.newBlockingStub(predecessorChannel);
+//        var stub = ReplicaGrpc.newBlockingStub(predecessorChannel);
         var ackRequest = AckRequest.newBuilder()
                 .setXid(xid).build();
-        stub.ack(ackRequest);
+        predecessorQueOps.submitRequest(ackRequest);
+//        stub.ack(ackRequest);
     }
 
     public ManagedChannel createChannel(String serverAddress){

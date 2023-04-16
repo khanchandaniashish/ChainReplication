@@ -38,6 +38,7 @@ edu/sjsu/cs249/chain/NewSuccessorResponse.class
 edu/sjsu/cs249/chain/HeadChainReplicaGrpc$HeadChainReplicaFutureStub.class
 edu/sjsu/cs249/chain/ReplicaGrpc$3.class
 edu/sjsu/cs249/chain/NewSuccessorRequestOrBuilder.class
+edu/sjsu/cs249/chainreplication/QueOps.class
 edu/sjsu/cs249/chain/UpdateRequest$Builder.class
 edu/sjsu/cs249/chain/HeadChainReplicaGrpc$HeadChainReplicaFileDescriptorSupplier.class
 edu/sjsu/cs249/chainreplication/ZooManager.class

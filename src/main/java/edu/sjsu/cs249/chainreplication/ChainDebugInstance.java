@@ -24,26 +24,28 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
      */
     @Override
     public void debug(ChainDebugRequest request, StreamObserver<ChainDebugResponse> responseObserver) {
-        ChainDebugResponse.Builder builder = ChainDebugResponse.newBuilder();
-        System.out.println("debug grpc called");
-//        chainNode.printMap();
-        builder.setXid(chainNode.lastSeenXId)
-                .putAllState(chainNode.dataMap);
+        synchronized (chainNode) {
+            ChainDebugResponse.Builder builder = ChainDebugResponse.newBuilder();
+            System.out.println("debug grpc called");
+//        //chainNode.printMap();
+            builder.setXid(chainNode.lastSeenXId)
+                    .putAllState(chainNode.dataMap);
 
-        for(int key: chainNode.pendingMap.keySet()) {
-            builder.addSent(UpdateRequest.newBuilder()
-                    .setXid(key)
-                    .setKey(chainNode.pendingMap.get(key).key)
-                    .setNewValue(chainNode.pendingMap.get(key).value)
-                    .build());
+            for (int key : chainNode.pendingMap.keySet()) {
+                builder.addSent(UpdateRequest.newBuilder()
+                        .setXid(key)
+                        .setKey(chainNode.pendingMap.get(key).key)
+                        .setNewValue(chainNode.pendingMap.get(key).value)
+                        .build());
+            }
+
+            System.out.println(builder.getXid());
+            System.out.println(builder.getStateMap());
+            System.out.println(builder.getSentList());
+            System.out.println("exiting debug synchronized block");
+            responseObserver.onNext(builder.build());
+            responseObserver.onCompleted();
         }
-
-        System.out.println(builder.getXid());
-        System.out.println(builder.getStateMap());
-        System.out.println(builder.getSentList());
-        System.out.println("exiting debug synchronized block");
-        responseObserver.onNext(builder.build());
-        responseObserver.onCompleted();
     }
 
     /**

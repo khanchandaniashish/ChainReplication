@@ -18,6 +18,9 @@ public class Initializer {
     String zooPath;
     ZooManager zooManager;
     ChainNode chainNode;
+    QueOps predecessorQueOps;
+
+    QueOps successorQueOps;
 
     Initializer(String yourName, String grpcServerAddress, String zooServerList, String zooPath) {
         this.yourName = yourName;
@@ -26,7 +29,13 @@ public class Initializer {
         this.zooPath = zooPath;
         zooManager = new ZooManager(zooServerList, zooPath, grpcServerAddress);
         zooManager.startZooKeeper();
-        this.chainNode = new ChainNode(zooManager);
+        predecessorQueOps = new QueOps<>(this);
+        successorQueOps = new QueOps<>(this);
+        predecessorQueOps.start();
+        successorQueOps.start();
+        this.chainNode = new ChainNode(zooManager,predecessorQueOps);
+        predecessorQueOps.chainNode = chainNode;
+        successorQueOps.chainNode = chainNode;
     }
 
     void start() throws IOException, InterruptedException, KeeperException {
