@@ -25,9 +25,8 @@ public class HeadChainReplicaGRPCServer extends HeadChainReplicaGrpc.HeadChainRe
     public void increment(IncRequest request, StreamObserver<HeadResponse> responseObserver) {
         synchronized (chainNode) {
             String key = request.getKey();
-            int value = request.getIncValue();
-
-            System.out.println("increment called with key :" + key + " and value :" + value);
+            int incValue = request.getIncValue();
+            System.out.println("Increment called with key :" + key + " and incValue :" + incValue);
 
             //If head update and pass it on
             if (!chainNode.isHead) {
@@ -38,42 +37,36 @@ public class HeadChainReplicaGRPCServer extends HeadChainReplicaGrpc.HeadChainRe
                 return;
             }
 
-            //Print map
-            System.out.println("Map before updates");
-//            //chainNode.printMap();
-
-            int updateValue = chainNode.dataMap.getOrDefault(key, 0) + value;
+            int updateValue = chainNode.dataMap.getOrDefault(key, 0) + incValue;
             //Update Map
             chainNode.dataMap.put(key, updateValue);
             int latestId = chainNode.lastSeenXId + 1;
             chainNode.lastSeenXId = latestId;
-            System.out.println("new xid : "+ latestId);
+            System.out.println("new xid : " + latestId);
 
-            //Print map
-            System.out.println("Map after updates");
-            ////chainNode.printMap();
 
-            //if tail, send back ack
-            if (chainNode.isTail) {
-                chainNode.lastSeenXId = latestId;
-                responseObserver.onNext(HeadResponse.newBuilder().setRc(0).build());
-                responseObserver.onCompleted();
-            } else {
+            if (!chainNode.isTail) {
                 //if not tail, send state to successor
                 KeyValuePair pendingPair = new KeyValuePair(key, updateValue);
                 chainNode.pendingMap.put(latestId, pendingPair);
                 chainNode.diligentObserver.put(latestId, responseObserver);
                 //chainNode.printMap();
                 //add to pending list : pending list of sent and pending list for head
-                sendUpdatesToSuccessor(pendingPair);
+                transferToSuccessor(pendingPair);
+            } else {
+                //if tail, send back ack
+                chainNode.lastSeenXId = latestId;
+                responseObserver.onNext(HeadResponse.newBuilder().setRc(0).build());
+                responseObserver.onCompleted();
+
             }
         }
     }
 
-    void sendUpdatesToSuccessor(KeyValuePair pendingPair) {
+    void transferToSuccessor(KeyValuePair pendingPair) {
         if (chainNode.isSuccessorAlive) {
-            var stub = ReplicaGrpc.newBlockingStub(chainNode.successorChannel);
-            System.out.println("sendUpdatesToSuccessor hit with xid:"+ chainNode.lastSeenXId +" key value:" + pendingPair.key+ " "+ pendingPair.value);
+            var stub = ReplicaGrpc.newBlockingStub(chainNode.updateChannel);
+            System.out.println("sendUpdatesToSuccessor hit with xid:" + chainNode.lastSeenXId + " key value:" + pendingPair.key + " " + pendingPair.value);
 
             var updateRequest = UpdateRequest.newBuilder()
                     .setXid(chainNode.lastSeenXId)

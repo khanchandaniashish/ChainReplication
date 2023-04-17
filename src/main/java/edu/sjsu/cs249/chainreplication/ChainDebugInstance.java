@@ -6,7 +6,7 @@ import io.grpc.stub.StreamObserver;
 /**
  * @author ashish
  */
-public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
+public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase {
 
     Initializer initializer;
 
@@ -26,8 +26,7 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
     public void debug(ChainDebugRequest request, StreamObserver<ChainDebugResponse> responseObserver) {
         synchronized (chainNode) {
             ChainDebugResponse.Builder builder = ChainDebugResponse.newBuilder();
-            System.out.println("debug grpc called");
-//        //chainNode.printMap();
+            System.out.println("Debug called!");
             builder.setXid(chainNode.lastSeenXId)
                     .putAllState(chainNode.dataMap);
 
@@ -38,11 +37,13 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
                         .setNewValue(chainNode.pendingMap.get(key).value)
                         .build());
             }
-
+            System.out.println("Printing some debug Stats");
+            System.out.println("-------------------------------");
             System.out.println(builder.getXid());
             System.out.println(builder.getStateMap());
             System.out.println(builder.getSentList());
-            System.out.println("exiting debug synchronized block");
+            System.out.println("End of Debug Stats");
+            System.out.println("-------------------------------");
             responseObserver.onNext(builder.build());
             responseObserver.onCompleted();
         }
@@ -56,12 +57,12 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase{
     public void exit(ExitRequest request, StreamObserver<ExitResponse> responseObserver) {
         synchronized (chainNode) {
             try {
-                chainNode.ackSemaphore.acquire();
-                System.out.println("Exiting Program!");
+                chainNode.onePermitLock.acquire();
+                System.out.println("Debug Exit Called");
                 responseObserver.onNext(ExitResponse.newBuilder().build());
                 responseObserver.onCompleted();
                 System.out.println("releasing semaphore for exit");
-                chainNode.ackSemaphore.release();
+                chainNode.onePermitLock.release();
                 System.exit(0);
             } catch (InterruptedException e) {
                 System.out.println("Problem acquiring semaphore");

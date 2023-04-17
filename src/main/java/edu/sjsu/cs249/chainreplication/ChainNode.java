@@ -8,11 +8,9 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
 
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Semaphore;
+import java.util.stream.Collectors;
 
 /**
  * @author ashish
@@ -37,20 +35,20 @@ public class ChainNode {
 
     String predecessorHostPort;
 
-    HashMap<Integer,KeyValuePair> pendingMap;
+    HashMap<Integer, KeyValuePair> pendingMap;
 
-    HashMap<Integer,StreamObserver> diligentObserver;
+    HashMap<Integer, StreamObserver> diligentObserver;
 
     long lastSeenZxid = -1;
 
-    int lastAckXid = -1 ;
+    int lastSeenAckXid = -1;
 
     List<String> zNodes;
 
-    Semaphore ackSemaphore;
+    Semaphore onePermitLock;
 
-    ManagedChannel successorChannel;
-    ManagedChannel predecessorChannel;
+    ManagedChannel updateChannel;
+    ManagedChannel ackChannel;
 
     QueOps predecessorQueOps;
 
@@ -62,11 +60,12 @@ public class ChainNode {
         this.isHead = false;
         this.isTail = false;
         this.isSuccessorAlive = false;
-        ackSemaphore = new Semaphore(1);
+        onePermitLock = new Semaphore(1);
         this.predecessorQueOps = predecessorQueOps;
     }
 
 
+    //A method to be able to see data in all maps
     public void printMap() {
         System.out.println("-----------------------------");
         System.out.println("Map is");
@@ -92,191 +91,216 @@ public class ChainNode {
 
     private Watcher babysitter() {
         return watchedEvent -> {
-            System.out.println("childrenWatcher triggered");
+            System.out.println("BabySitter Service triggered to watch the Children!");
             System.out.println("WatchedEvent: " + watchedEvent.getType() + " on " + watchedEvent.getPath());
-            try {
-                this.getChildren();
-                this.callPredecessorAndSetSuccessorData();
-            } catch (InterruptedException | KeeperException e) {
-                System.out.println("Error getting children with getChildrenInPath()");
-            }
+            getChildren();
+            joinTheChain();
         };
     }
 
-    public void getChildren() throws InterruptedException, KeeperException {
-        Stat replicaPath = new Stat();
-        List<String> children = zooManager.zk.getChildren(zooManager.zooPath, babysitter(), replicaPath);
-        lastSeenZxid = replicaPath.getPzxid();
-        zNodes = children.stream().filter(
-                child -> child.contains("replica-")).toList();
-        System.out.println("Current replicas: " + zNodes +
-                ", lastZxidSeen: " + lastSeenZxid);
+    public void getChildren() {
+        try {
+            Stat replicaPath = new Stat();
+            List<String> children = zooManager.zk.getChildren(zooManager.zooPath, babysitter(), replicaPath);
+            lastSeenZxid = replicaPath.getPzxid();
+            zNodes = getzNodes(children);
+            System.out.println("getChildren Znodes: " + zNodes +
+                    ", with lastSeenZxid: " + lastSeenZxid);
+        } catch (InterruptedException | KeeperException e) {
+            System.out.println("Error getting children with getChildrenInPath()");
+        }
     }
+
+    private static List<String> getzNodes(List<String> children) {
+        ArrayList<String> res = new ArrayList<>();
+        for (String child : children) {
+            if (child.contains("replica-")) {
+                res.add(child);
+            }
+        }
+        return res;
+    }
+
 
     /**
-     Triggers first time on initialize.
-     Triggers when there is a change in children path.
+     * Triggers first time on initialize.
+     * Triggers when there is a change in children path.
      */
-    void callPredecessorAndSetSuccessorData() throws InterruptedException, KeeperException {
-        List<String> sortedzNodes = zNodes.stream().sorted(Comparator.naturalOrder()).toList();
+    void joinTheChain() {
+        List<String> zNodesOrdered = OrderZNodes();
+        String myNode = zooManager.zName;
 
-        String myReplicaName = zooManager.zName.replace(zooManager.zooPath + "/", "");
-        isHead = sortedzNodes.get(0).equals(myReplicaName);
-        isTail = sortedzNodes.get(sortedzNodes.size() - 1).equals(myReplicaName);
-        System.out.println("isHead: " + isHead + ", isTail: " + isTail);
+        //check and set if Head or Tail
+        isHead = zNodesOrdered.get(0).equals(myNode);
+        System.out.println("MyNode : Head Status: " + isHead);
+        isTail = zNodesOrdered.get(zNodesOrdered.size() - 1).equals(myNode);
+        System.out.println("MyNode : Tail Status: " + isTail);
 
-        callPredecessor(sortedzNodes);
-        setSuccessorData(sortedzNodes);
+        hookUpPredecessor(zNodesOrdered);
+        hookUpSuccessor(zNodesOrdered);
     }
 
-    public void callPredecessor(List<String> sortedzNodes) throws InterruptedException, KeeperException {
-        if(isHead){
-            if (predecessorChannel != null) {
-                predecessorChannel.shutdownNow();
+
+    // Ordering to figure out myNode's position in the chain
+    private List<String> OrderZNodes() {
+        return zNodes.stream().sorted(new Comparator<String>() {
+            @Override
+            public int compare(String o1, String o2) {
+                return o1.compareTo(o2);
             }
-            predecessorHostPort = "";
+        }).collect(Collectors.toList());
+    }
+
+    public void hookUpPredecessor(List<String> orderedzNodes) {
+        System.out.println("Started joining the chain by connecting to predeccsor!");
+        if (isHead) {
+            System.out.println("Setting head props as I'm head!");
+            setHeadProperties();
             return;
         }
 
-        String myReplicaName = zooManager.zName.replace(zooManager.zooPath + "/", "");
-        System.out.println("myReplicaName : "+ myReplicaName);
-        printMap();
-        int myPosition = sortedzNodes.indexOf(myReplicaName);
-        String predecessorName = sortedzNodes.get(myPosition-1);
+        String myChainNode = zooManager.zName;
+        //TODO remove if all fine
+//                .replace(zooManager.zooPath + "/", "");
+//        printMap();
+        int myPosition = orderedzNodes.indexOf(myChainNode);
+        String predecessorName = orderedzNodes.get(myPosition - 1);
 
+        try {
+            String currData = new String(zooManager.zk.getData(zooManager.zooPath + "/" + predecessorName, false, null));
+            String currPredecessorHostPort = currData.split("\n")[0];
 
-
-        String data = new String(zooManager.zk.getData(zooManager.zooPath + "/" + predecessorName, false, null));
-        String newPredecessorAddress = data.split("\n")[0];
-        String newPredecessorName = data.split("\n")[1];
-
-        if (!newPredecessorAddress.equals(predecessorHostPort)) {
-            System.out.println("new predecessor");
-            System.out.println("newPredecessorAddress: " + newPredecessorAddress);
-            System.out.println("newPredecessorName: " + newPredecessorName);
-
-            System.out.println("calling newSuccessor of new predecessor.");
-            System.out.println("params:" +
-                    ", lastZxidSeen: " + lastSeenZxid +
-                    ", lastXid: " + lastSeenXId +
-                    ", lastAck: " + lastAckXid +
-                    ", myReplicaName: " + zooManager.zName);
-
-            predecessorHostPort = newPredecessorAddress;
-            predecessorChannel = this.createChannel(predecessorHostPort);
-            var stub = ReplicaGrpc.newBlockingStub(predecessorChannel);
-            var newSuccessorRequest = NewSuccessorRequest.newBuilder()
-                    .setLastZxidSeen(lastSeenZxid)
-                    .setLastXid(lastSeenXId)
-                    .setLastAck(lastAckXid)
-                    .setZnodeName(zooManager.zName).build();
-
-            NewSuccessorResponse newSuccessorResponse = stub.newSuccessor(newSuccessorRequest);
-                    long rc = newSuccessorResponse.getRc();
-                    System.out.println("Response received");
-                    System.out.println("rc: " + rc);
-                    if (rc == -1) {
-                        try {
-                            getChildren();
-                            callPredecessorAndSetSuccessorData();
-                        } catch (InterruptedException | KeeperException e) {
-                            System.out.println("Error getting children with getChildrenInPath()");
-                        }
-                    } else if (rc == 0) {
-                        lastSeenXId = newSuccessorResponse.getLastXid();
-                        //TODO changes
-                        System.out.println("lastSeenXId: " + lastSeenXId);
-                        System.out.println("state value:");
-                        for (String key : newSuccessorResponse.getStateMap().keySet()) {
-                            dataMap.put(key, newSuccessorResponse.getStateMap().get(key));
-                            System.out.println(key + ": " + newSuccessorResponse.getStateMap().get(key));
-                        }
-                        addPendingUpdateRequests(newSuccessorResponse);
-                    } else {
-                        lastSeenXId = newSuccessorResponse.getLastXid();
-                        System.out.println("lastSeenXId: " + lastSeenXId);
-                        addPendingUpdateRequests(newSuccessorResponse);
-                    }
-                }
+            if (!currPredecessorHostPort.equals(predecessorHostPort)) {
+                String currPredecessorName = currData.split("\n")[1];
+                repositionPredecessor(currPredecessorHostPort, currPredecessorName);
+            }
+        } catch (InterruptedException | KeeperException e) {
+            System.out.println("Error getting children with getChildrenInPath()");
         }
+    }
 
-    private void addPendingUpdateRequests(NewSuccessorResponse newSuccessorResponse) {
-        List<UpdateRequest> sent = newSuccessorResponse.getSentList();
-        System.out.println("sent requests: ");
-        for (UpdateRequest request : sent) {
-            String key = request.getKey();
-            int newValue = request.getNewValue();
-            int xid = request.getXid();
+    private void repositionPredecessor(String updatedPredecessorHostPort, String updatedPredecessorName) {
+        System.out.println("Repositioning Predec as Curr Predecessor does not match old Predecessor! New Predec details : " + updatedPredecessorName + " " + updatedPredecessorName);
+
+        predecessorHostPort = updatedPredecessorHostPort;
+        NewSuccessorResponse newSuccessorResponse = sendNewSuccessorRequest(predecessorHostPort);
+        long newSuccResponseCode = newSuccessorResponse.getRc();
+
+        if (newSuccResponseCode == -1) {
+            //TODO check if we need this? MVP2
+            retry();
+        } else if (newSuccResponseCode == 0) {
+            System.out.println("newSuccResponseCode returned with 0 successfully with lastSeenXId: " + newSuccessorResponse.getLastXid());
+            lastSeenXId = newSuccessorResponse.getLastXid();
+            System.out.println("Transferring State...");
+            for (String key : newSuccessorResponse.getStateMap().keySet()) {
+                dataMap.put(key, newSuccessorResponse.getStateMap().get(key));
+            }
+            transferPendingMap(newSuccessorResponse);
+        } else {
+            System.out.println("newSuccResponseCode returned with 1 successfully with lastSeenXId: " + newSuccessorResponse.getLastXid());
+            lastSeenXId = newSuccessorResponse.getLastXid();
+            System.out.println("Transferring only updates!");
+            transferPendingMap(newSuccessorResponse);
+        }
+    }
+
+    private void retry() {
+        getChildren();
+        joinTheChain();
+    }
+
+    private NewSuccessorResponse sendNewSuccessorRequest(String receiverAddr) {
+        System.out.println("sendNewSuccessorRequest routed to :" + receiverAddr);
+        ackChannel = this.getNewChannel(receiverAddr);
+        var stub = ReplicaGrpc.newBlockingStub(ackChannel);
+        var newSuccessorRequest = NewSuccessorRequest.newBuilder()
+                .setLastZxidSeen(lastSeenZxid)
+                .setLastXid(lastSeenXId)
+                .setLastAck(lastSeenAckXid)
+                .setZnodeName(zooManager.zName).build();
+        return stub.newSuccessor(newSuccessorRequest);
+    }
+
+
+    private void setHeadProperties() {
+        //If I'm head : shutdown the ack channel and unset predecessor
+        if (ackChannel != null) {
+            ackChannel.shutdownNow();
+        }
+        predecessorHostPort = "";
+    }
+
+    private void transferPendingMap(NewSuccessorResponse newSuccessorResponse) {
+        System.out.println("Transferring pending Map");
+        List<UpdateRequest> pendingMapPredec = newSuccessorResponse.getSentList();
+
+        for (UpdateRequest updateRequest : pendingMapPredec) {
+            String key = updateRequest.getKey();
+            int newValue = updateRequest.getNewValue();
+            int xid = updateRequest.getXid();
             pendingMap.put(xid, new KeyValuePair(key, newValue));
-            System.out.println("xid: " + xid + ", key: " + key + ", value: " + newValue);
+            System.out.println("Added from PredecSentList : xid: " + xid + ", key: " + key + ", value: " + newValue);
         }
 
+        // TODO check MVP2
         if (isTail && pendingMap.size() > 0) {
-            System.out.println("I am tail, have to ack back all pending requests!");
+            System.out.println("Acking back all the req's from the tail!");
             Map<Integer, KeyValuePair> iterMap = new HashMap<Integer, KeyValuePair>(pendingMap);
-            for (int xid: iterMap.keySet()) {
-                ackXid(xid);
+            for (int xid : iterMap.keySet()) {
+                sendAcks(xid);
             }
         }
     }
 
-    public void ackXid (int xid) {
-        System.out.println("calling ack method of predecessor: " + predecessorHostPort);
-        lastAckXid = xid;
+    public void sendAcks(int xid) {
+        System.out.println("Sending Ack to: " + predecessorHostPort);
+        lastSeenAckXid = xid;
         pendingMap.remove(xid);
-        System.out.println(" Got ack and removed xid : "+ xid);
-//        var stub = ReplicaGrpc.newBlockingStub(predecessorChannel);
+        System.out.println(" Acked and Removed XID form pendingMap: " + xid);
         var ackRequest = AckRequest.newBuilder()
                 .setXid(xid).build();
-        predecessorQueOps.submitRequest(ackRequest);
-//        stub.ack(ackRequest);
+        predecessorQueOps.enque(ackRequest);
     }
 
-    public ManagedChannel createChannel(String serverAddress){
-        var lastColon = serverAddress.lastIndexOf(':');
-        var host = serverAddress.substring(0, lastColon);
-        var port = Integer.parseInt(serverAddress.substring(lastColon+1));
-        return ManagedChannelBuilder
-                .forAddress(host, port)
-                .usePlaintext()
-                .build();
-    }
 
-    void setSuccessorData(List<String> sortedReplicas) {
+    void hookUpSuccessor(List<String> zNodesOrdered) {
         if (isTail) {
-            if (successorChannel != null) {
-                successorChannel.shutdownNow();
-            }
-            successorHostPort = "";
-            successorName = "";
-            isSuccessorAlive = false;
+            setTailProps();
             return;
         }
 
-        int index = sortedReplicas.indexOf(zooManager.zName);
-        String newSuccessorZNode = sortedReplicas.get(index + 1);
+        int index = zNodesOrdered.indexOf(zooManager.zName);
+        String updatedSuccessorZnode = zNodesOrdered.get(index + 1);
 
-        // If the curr successor replica name matches the new one,
-        // then hasSuccessorContacted should be the old value of hasSuccessorContacted
-        // else it should be false
-        if (!newSuccessorZNode.equals(successorName)) {
-            successorName = newSuccessorZNode;
+        //Check if Succesor is updated
+        if (!updatedSuccessorZnode.equals(successorName)) {
+            successorName = updatedSuccessorZnode;
             isSuccessorAlive = false;
             System.out.println("new successor");
             System.out.println("successorName: " + successorName);
         }
     }
-}
 
+    private void setTailProps() {
+        //Since tail no need to update anyone else
+        if (updateChannel != null) {
+            updateChannel.shutdownNow();
+        }
+        //unset successors
+        successorHostPort = "";
+        successorName = "";
+        isSuccessorAlive = false;
+    }
 
-
-class KeyValuePair{
-    String key;
-    int value;
-
-
-    public KeyValuePair(String key, int value) {
-        this.key = key;
-        this.value = value;
+    public ManagedChannel getNewChannel(String serverAddress) {
+        var lastColon = serverAddress.lastIndexOf(':');
+        var host = serverAddress.substring(0, lastColon);
+        var port = Integer.parseInt(serverAddress.substring(lastColon + 1));
+        return ManagedChannelBuilder
+                .forAddress(host, port)
+                .usePlaintext()
+                .build();
     }
 }
+
