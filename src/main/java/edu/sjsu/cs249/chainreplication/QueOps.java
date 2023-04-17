@@ -14,30 +14,27 @@ import io.grpc.StatusRuntimeException;
  */
 public class QueOps<T> extends Thread  {
 
-        private final BlockingQueue<T> requestQueue;
+        // A blocking que to buffer up the requests
+        private final BlockingQueue<T> buffer;
         Initializer initializer;
         ChainNode chainNode;
         private boolean isPaused;
 
         public QueOps(Initializer initializer) {
-            requestQueue = new LinkedBlockingQueue<>();
+            buffer = new LinkedBlockingQueue<>();
             this.initializer = initializer;
             isPaused = false;
         }
 
-        public void submitRequest(T request) {
+        public void enque(T request) {
             System.out.println("puting req into qu" +request);
-            requestQueue.offer(request);
+            buffer.offer(request);
         }
 
-        public boolean isEmpty() {
-            return requestQueue.isEmpty();
-        }
-
-        public void pause() {
+        public void freeze() {
             isPaused = true;
         }
-        public void play() {
+        public void flow() {
             isPaused = false;
         }
 
@@ -45,13 +42,12 @@ public class QueOps<T> extends Thread  {
         public void run() {
             while (true) {
                 try {
-                    T request = requestQueue.take();
-
+                    T request = buffer.take();
                     // Check if queue is paused
                     while (isPaused) {
                         Thread.sleep(100);
                     }
-                    executeRequest(request);
+                    WorkTheBuffer(request);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -59,37 +55,38 @@ public class QueOps<T> extends Thread  {
             }
         }
 
-        private void executeRequest(T request) throws InterruptedException {
-            // execute the request here
-            int numRetries = 3;
+        private void WorkTheBuffer(T request) throws InterruptedException {
             int retryCount = 0;
-            boolean success = false;
+            boolean connectionStatus = false;
             int delay = 500;
 
-            while(!success && retryCount < numRetries) {
+            while(!connectionStatus) {
                 try {
+                    System.out.println("Retrying to connect to chain");
                     ReplicaGrpc.ReplicaBlockingStub stub;
-                    if (request instanceof UpdateRequest) {
-                        System.out.println("Channel is : "+ chainNode.successorChannel);
-                        stub = ReplicaGrpc.newBlockingStub(chainNode.successorChannel).withDeadlineAfter(5L, TimeUnit.SECONDS);
-                        stub.update((UpdateRequest) request);
-                    } else if (request instanceof AckRequest) {
-                        System.out.println("Channel is : "+ chainNode.predecessorChannel);
-                        stub = ReplicaGrpc.newBlockingStub(chainNode.predecessorChannel).withDeadlineAfter(5L, TimeUnit.SECONDS);
-                        stub.ack((AckRequest) request);
-                    }
-                    success = true;
-                } catch (StatusRuntimeException var7) {
-                    System.err.println("Error occurred while executing the request: " + var7.getMessage());
-                    ++retryCount;
+                    requestRouter(request);
+                    connectionStatus = true;
+                } catch (StatusRuntimeException exc) {
+                    System.out.println("Error occurred while executing the request: " + exc.getMessage());
+                    System.out.println("Could not connect. Perhaps try to reconnect?");
+                    exc.printStackTrace();
                     Thread.sleep((long)delay);
                     delay *= 2;
                 }
             }
-
-            if (!success) {
-                System.err.println("Failed to execute the request after " + numRetries + " retries: " + request);
-            }
         }
+
+    private  void requestRouter(T request) {
+        ReplicaGrpc.ReplicaBlockingStub stub;
+        if (request instanceof UpdateRequest) {
+            System.out.println("Channel is : "+ chainNode.updateChannel);
+            stub = ReplicaGrpc.newBlockingStub(chainNode.updateChannel).withDeadlineAfter(5L, TimeUnit.SECONDS);
+            stub.update((UpdateRequest) request);
+        } else if (request instanceof AckRequest) {
+            System.out.println("Channel is : "+ chainNode.ackChannel);
+            stub = ReplicaGrpc.newBlockingStub(chainNode.ackChannel).withDeadlineAfter(5L, TimeUnit.SECONDS);
+            stub.ack((AckRequest) request);
+        }
+    }
 
 }

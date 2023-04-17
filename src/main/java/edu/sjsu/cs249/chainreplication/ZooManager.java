@@ -1,17 +1,11 @@
 package edu.sjsu.cs249.chainreplication;
 
-import com.google.rpc.Code;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.zookeeper.*;
-import org.apache.zookeeper.data.Stat;
-import org.checkerframework.checker.units.qual.A;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Objects;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooKeeper;
 
 /**
  * @author ashish
@@ -32,7 +26,7 @@ public class ZooManager {
 
     private static final Logger logger = LogManager.getLogger(ZooManager.class);
 
-    ZooManager(String zooServers, String zooPath,String grpcServerAddress){
+    ZooManager(String zooServers, String zooPath, String grpcServerAddress) {
         this.zooServers = zooServers;
         this.zooPath = zooPath;
         this.grpcServerAddress = grpcServerAddress;
@@ -60,12 +54,20 @@ public class ZooManager {
         }
     }
 
+//    private void syncWithTheZoo(StreamObserver<NewSuccessorResponse> responseObserver, int lastestXid, int lastestAck,String successorHostPort, String requestedSuccessor) {
+//        zk.sync(zooPath, (i, s, o) -> {
+//            if (i == Code.OK_VALUE && Objects.equals(successorHostPort, requestedSuccessor)) {
+//                successorProcedure(lastestAck, lastestXid, requestedSuccessor, responseObserver);
+//            }
+//        }, null);
+//    }
+
     void createZooNode(String nodeName) {
         try {
-            System.out.println("Creating node : "+ nodeName);
+            System.out.println("Creating node : " + nodeName);
             zName = zk.create(zooPath + "/replica-", (grpcServerAddress + "\n" + nodeName).getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
             zName = zName.replace(zooPath + "/", "");
-            System.out.println("Node created : "+zName);
+            System.out.println("Node created : " + zName);
         } catch (KeeperException | InterruptedException e) {
             System.out.println("---------------------");
             System.out.println("node creation issue!");

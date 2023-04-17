@@ -27,6 +27,7 @@ edu/sjsu/cs249/chain/ChainDebugGrpc$ChainDebugStub.class
 edu/sjsu/cs249/chain/ChainDebugGrpc$3.class
 edu/sjsu/cs249/chain/TailChainReplicaGrpc$TailChainReplicaFileDescriptorSupplier.class
 edu/sjsu/cs249/chain/Chain.class
+edu/sjsu/cs249/chainreplication/ChainNode$1.class
 edu/sjsu/cs249/chain/ExitRequestOrBuilder.class
 edu/sjsu/cs249/chain/HeadChainReplicaGrpc$HeadChainReplicaBlockingStub.class
 edu/sjsu/cs249/chain/GetResponse.class
