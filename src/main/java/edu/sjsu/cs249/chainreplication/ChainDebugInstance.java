@@ -3,6 +3,9 @@ package edu.sjsu.cs249.chainreplication;
 import edu.sjsu.cs249.chain.*;
 import io.grpc.stub.StreamObserver;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * @author ashish
  */
@@ -30,7 +33,8 @@ public class ChainDebugInstance extends ChainDebugGrpc.ChainDebugImplBase {
             builder.setXid(chainNode.lastSeenXId)
                     .putAllState(chainNode.dataMap);
 
-            for (int key : chainNode.pendingMap.keySet()) {
+            Map<Integer, KeyValuePair> iterMap = new HashMap<Integer, KeyValuePair>(chainNode.pendingMap);
+            for (int key : iterMap.keySet()) {
                 builder.addSent(UpdateRequest.newBuilder()
                         .setXid(key)
                         .setKey(chainNode.pendingMap.get(key).key)
